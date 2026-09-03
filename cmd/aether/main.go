@@ -1,4 +1,8 @@
-// Package main is the entry point of the Aether proxy application.
+// Package main is the Aether proxy entry point.
+//
+// Plan 1 version: wires SOCKS5 in + direct out through the
+// StaticDispatcher. No sniffing, routing, DNS, or config file yet.
+// Those arrive in later plans.
 package main
 
 import (
@@ -10,50 +14,53 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/CelestialLuminary36/Aether/core"
+	"github.com/CelestialLuminary36/Aether/dispatcher"
 	"github.com/CelestialLuminary36/Aether/inbound/socks"
+	"github.com/CelestialLuminary36/Aether/outbound/block"
 	"github.com/CelestialLuminary36/Aether/outbound/direct"
 )
 
-func main() {
-	// Initialize the default structured logger to stdout.
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	slog.SetDefault(logger)
+const (
+	listenAddr = "127.0.0.1:1080"
+	adminUser  = "admin"
+	adminPass  = "123456"
+)
 
-	// Create a context that is canceled when an interrupt or termination signal is received.
+func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// Build the outbound dialer and inbound listener.
-	outboundDirect := direct.New()
-	socksInbound := socks.New("127.0.0.1:1080")
+	// Outbounds.
+	out := direct.New("out-direct")
+	blk := block.New("out-block")
 
-	slog.Info("Aether Starting...", "version", "1.27.1")
+	// Dispatcher: Plan 1 always uses the primary outbound.
+	// TODO(user): in Plan 2 replace StaticDispatcher with the real
+	// pipeline dispatcher that uses route.Router + dns.Resolver.
+	disp := dispatcher.New(out, blk)
 
-	// Start the SOCKS5 inbound server and handle each accepted connection.
-	err := socksInbound.Start(ctx, func(sess *core.Session, inConn net.Conn) {
-		defer inConn.Close()
+	// Inbound: SOCKS5 with password auth.
+	in := socks.New(
+		"in-socks",
+		listenAddr,
+		socks.AuthPassword,
+		map[string]string{adminUser: adminPass},
+		disp,
+	)
 
-		slog.Debug("Receiving inbound connection", "inbound", socksInbound.Name(), "target", sess.TargetAddrPort)
+	slog.Info("Aether starting", "version", "1.27.1")
 
-		// Dial the target address through the direct outbound.
-		outConn, err := outboundDirect.DialContext(sess.Context, sess)
-
-		if err != nil {
-			slog.Error("Dialing target failed", "target", sess.TargetAddr, "err", err)
-			return
-		}
-		defer outConn.Close()
-
-		// Relay traffic bidirectionally between the inbound and outbound connections.
-		core.Relay(inConn, outConn)
-	})
-	if err != nil && !errors.Is(err, net.ErrClosed) {
+	if err := in.Start(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
 		slog.Error("Aether exited unexpectedly", "err", err)
 		os.Exit(1)
 	}
 
-	slog.Info("Aether listening on 127.0.0.1:1080, press Ctrl+C to exit")
+	slog.Info("Aether listening", "addr", listenAddr, "auth", "password")
+
 	<-ctx.Done()
+	slog.Info("Aether shutting down")
+	_ = in.Close()
 	slog.Info("Aether shut down gracefully")
 }

@@ -1,6 +1,12 @@
 // Package bufpool provides a generic, typed wrapper around sync.Pool for
 // reusing fixed-size byte buffers, which helps reduce GC pressure during
 // high-throughput relay operations.
+//
+// Note: for TCP↔TCP relays (Plan 1's only case), io.CopyBuffer will
+// bypass this buffer entirely because *net.TCPConn implements
+// io.ReaderFrom and takes the splice(2) fast path on Linux. This pool
+// becomes effective once encrypted outbounds (Plan 6+) wrap the conn
+// in something that does NOT implement io.ReaderFrom.
 package bufpool
 
 import "sync"

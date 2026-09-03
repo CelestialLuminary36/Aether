@@ -1,25 +1,45 @@
 # Aether
 
-Aether is a lightweight TCP proxy written in Go. It exposes a SOCKS5 inbound listener and forwards accepted connections to their requested destinations through a direct (unproxied) outbound dialer.
+Aether is a next-generation proxy aiming to combine the maturity of xray
+with the modernity of sing-box while fixing their respective pain points:
+overgrown legacy code, breaking configuration changes, and confusing
+mental models.
 
-## Features
-
-- **SOCKS5 inbound** — minimal, no-authentication SOCKS5 handshake.
-- **Direct outbound** — connects targets straight over TCP.
-- **Bidirectional relay** — copies traffic between client and target using a reusable buffer pool.
-- **Graceful shutdown** — listens for `SIGINT`/`SIGTERM` and stops cleanly.
+This repository is currently a skeleton. The core contracts and directory
+structure are in place; the implementations follow in staged plans.
 
 ## Project Structure
 
 ```
 .
-├── cmd/aether        # Application entry point
-├── common/bufpool    # Reusable byte-buffer pool
-├── core              # Session state and traffic relay
-├── inbound           # Inbound listener interface
-│   └── socks         # SOCKS5 server implementation
-└── outbound          # Outbound dialer interface
-    └── direct        # Direct TCP dialer
+├── cmd/aether           # Application entry point
+├── common
+│   ├── bufpool          # Reusable byte-buffer pool (for relay)
+│   └── packet           # Head-reserved byte buffer (for UDP protocols)
+├── core                 # Contracts: Addr, Metadata, interfaces, errors
+├── dispatcher           # Traffic scheduler (StaticDispatcher in Plan 1)
+├── config               # Configuration loading and validation (Plan 2)
+├── dns                  # DNS subsystem (Plan 3)
+├── route                # Routing engine (Plan 2)
+├── sniff                # Non-destructive protocol sniffing (Plan 2)
+├── stats                # Observability (Plan 10)
+├── inbound
+│   ├── socks            # SOCKS5 inbound
+│   ├── http             # HTTP CONNECT inbound (Plan 5)
+│   └── mixed            # SOCKS5 + HTTP on one port (Plan 5)
+├── outbound
+│   ├── direct           # Direct TCP dialer
+│   ├── block            # Reject all dials
+│   ├── socks            # SOCKS5 upstream client (Plan 7)
+│   ├── http             # HTTP CONNECT upstream client (Plan 7)
+│   ├── shadowsocks      # Shadowsocks-2022 outbound (Plan 6)
+│   └── trojan           # Trojan outbound (Plan 7)
+├── transport
+│   ├── tcp              # Plain TCP transport (Plan 7)
+│   └── ws               # WebSocket transport (Plan 7)
+└── security
+    ├── none             # No-op security layer (Plan 7)
+    └── tls              # TLS security layer (Plan 7)
 ```
 
 ## Requirements
@@ -38,14 +58,14 @@ go build -o aether ./cmd/aether
 ./aether
 ```
 
-By default, Aether listens on `127.0.0.1:1080`. Configure your client to use this SOCKS5 proxy, then press `Ctrl+C` to stop.
+By default Aether listens on `127.0.0.1:1080` with username/password
+authentication (`admin` / `123456`).
 
-## Example Output
+## Status
 
-```text
-time=... level=INFO msg="Aether Starting..." version=1.27.1
-time=... level=INFO msg="Aether listening on 127.0.0.1:1080, press Ctrl+C to exit"
-```
+Skeleton phase: the project compiles and passes placeholder tests, but
+SOCKS5 is stubbed. Follow `docs/superpowers/plans/` to implement each
+plan.
 
 ## License
 

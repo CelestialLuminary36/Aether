@@ -7,25 +7,33 @@ import (
 	"net"
 
 	"github.com/CelestialLuminary36/Aether/core"
-	"github.com/CelestialLuminary36/Aether/outbound"
 )
 
-// Direct is a passthrough outbound that dials the requested target address
-// using the standard library's net.Dialer.
-type Direct struct{}
-
-// New creates a new direct outbound dialer.
-func New() outbound.Outbound {
-	return &Direct{}
+// Direct is a passthrough outbound that dials the requested target using
+// the standard library's net.Dialer.
+type Direct struct {
+	tag string
 }
 
-// Name returns the protocol identifier for this outbound.
-func (d *Direct) Name() string {
-	return "direct"
+// New creates a new direct outbound with the given tag.
+func New(tag string) *Direct {
+	return &Direct{tag: tag}
 }
 
-// DialContext opens a TCP connection to the target specified in sess.
-func (d *Direct) DialContext(ctx context.Context, sess *core.Session) (net.Conn, error) {
+func (d *Direct) Tag() string             { return d.tag }
+func (d *Direct) Type() string            { return "direct" }
+func (d *Direct) Networks() []core.Network { return []core.Network{core.NetworkTCP} }
+
+// DialStream opens a TCP connection to md.Destination.
+func (d *Direct) DialStream(ctx context.Context, md *core.Metadata) (net.Conn, error) {
 	var dialer net.Dialer
-	return dialer.DialContext(ctx, "tcp", sess.TargetAddr)
+	return dialer.DialContext(ctx, "tcp", md.Destination.String())
+}
+
+// DialPacket is not implemented in Plan 1.
+//
+// TODO(user): implement UDP direct dial in Plan 4. You will need a
+// net.ListenUDP binding and a core.PacketConn adapter.
+func (d *Direct) DialPacket(ctx context.Context, md *core.Metadata) (core.PacketConn, error) {
+	return nil, core.ErrNetworkNotSupported
 }
