@@ -18,6 +18,9 @@ type Session struct {
 
 	// TargetAddrPort is the parsed destination address, if available.
 	TargetAddrPort netip.AddrPort
+
+	// Username
+	Username string
 }
 
 // NewSession creates a Session from the given context, target address, and

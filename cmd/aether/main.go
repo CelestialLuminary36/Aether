@@ -26,7 +26,9 @@ func main() {
 
 	// Build the outbound dialer and inbound listener.
 	outboundDirect := direct.New()
-	socksInbound := socks.New("127.0.0.1:1080")
+	socksInbound := socks.New("127.0.0.1:7734", socks.AuthPassword, map[string]string{
+		"admin": "123456",
+	})
 
 	slog.Info("Aether Starting...", "version", "1.27.1")
 
@@ -53,7 +55,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("Aether listening on 127.0.0.1:1080, press Ctrl+C to exit")
+	slog.Info("Aether listening on 127.0.0.1:7734, press Ctrl+C to exit")
 	<-ctx.Done()
 	slog.Info("Aether shut down gracefully")
 }
