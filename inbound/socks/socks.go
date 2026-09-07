@@ -3,13 +3,14 @@ package socks
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/netip"
-	"strconv"
+	"slices"
 
 	"github.com/CelestialLuminary36/Aether/core"
 )
@@ -27,12 +28,14 @@ const (
 	authSuccess     = 0x00
 	authFailure     = 0x01
 
-	repSucceeded           byte = 0x00
-	repGeneralFailure      byte = 0x01
-	repNotAllowedByRuleset byte = 0x02
-	repNetworkUnreachable  byte = 0x03
-	repHostUnreachable     byte = 0x04
-	repConnectionRefused   byte = 0x05
+	repSucceeded               byte = 0x00
+	repGeneralFailure          byte = 0x01
+	repNotAllowedByRuleset     byte = 0x02
+	repNetworkUnreachable      byte = 0x03
+	repHostUnreachable         byte = 0x04
+	repConnectionRefused       byte = 0x05
+	repCommandNotSupported     byte = 0x07
+	repAddressTypeNotSupported byte = 0x08
 )
 
 // AuthMethod selects the SOCKS5 authentication method.
@@ -128,27 +131,83 @@ func (s *Server) Close() error {
 }
 
 // handleConn performs the SOCKS5 handshake and dispatches to the core.Dispatcher.
-//
-// TODO(user): this is the main integration point. Implement the full
-// handshake (method negotiation, optional auth, CONNECT request parsing),
-// build a core.Metadata, call s.dispatcher.DispatchStream with an
-// onDialed callback that writes the SOCKS5 success reply, and translate
-// dial errors into REP codes using mapErrToRep.
-//
-// See Plan 1 Task 10 for the complete implementation guide.
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 
-	// TODO(user): implement SOCKS5 handshake.
+	buf := make([]byte, 512)
 	// 1. Read method negotiation and select auth.
+	nmethods, err := s.negotiate(conn, buf)
+	if err != nil {
+		slog.Debug("SOCKS5 method negotiation failed", "remote", conn.RemoteAddr(), "err", err)
+		return
+	}
+	selected, ok := s.selectAuthMethod(buf[:nmethods])
+	if !ok {
+		_, _ = conn.Write([]byte{socksVersion, authNoAccept})
+		return
+	}
+	if _, err := conn.Write([]byte{socksVersion, selected}); err != nil {
+		slog.Debug("SOCKS5 failed to write method selection", "remote", conn.RemoteAddr(), "err", err)
+		return
+	}
 	// 2. Optionally perform username/password auth.
+	var user string
+	if selected == authPassword {
+		user, err = s.authenticate(conn)
+		if err != nil {
+			slog.Debug("SOCKS5 authentication failed", "remote", conn.RemoteAddr(), "err", err)
+			return
+		}
+	}
 	// 3. Read CONNECT request: VER CMD RSV ATYP DST.ADDR DST.PORT.
+	target, rep, err := s.readConnectRequest(conn, buf)
+	if err != nil {
+		slog.Debug("SOCKS5 failed to read CONNECT request", "remote", conn.RemoteAddr(), "err", err)
+		_ = writeSocks5Reply(conn, rep)
+		return
+	}
 	// 4. Build core.Metadata from remote address and target.
+	md := &core.Metadata{
+		Network:     core.NetworkTCP,
+		Source:      addrFromNet(conn.RemoteAddr()),
+		Destination: target,
+		InboundTag:  s.tag,
+		User:        user,
+	}
 	// 5. Call s.dispatcher.DispatchStream(ctx, md, conn, onDialed).
 	//    In onDialed, write repSucceeded.
+	var dialed bool
+	onDialed := func() error {
+		dialed = true
+		return writeSocks5Reply(conn, repSucceeded)
+	}
 	// 6. If dispatch returns an error before onDialed ran, write the
-	//    mapped REP code and close.
-	_ = writeSocks5Reply(conn, repGeneralFailure)
+	if err := s.dispatcher.DispatchStream(ctx, md, conn, onDialed); err != nil && !dialed {
+		//    mapped REP code and close.
+		_ = writeSocks5Reply(conn, mapErrToRep(err))
+	}
+}
+
+func (s *Server) negotiate(conn net.Conn, buf []byte) (int, error) {
+	// VER + METHODS
+	if _, err := io.ReadFull(conn, buf[:2]); err != nil {
+		return -1, err
+	}
+	if buf[0] != 0x05 {
+		return -1, fmt.Errorf("unsupported SOCKS version %d", buf[0])
+	}
+	nmethods := int(buf[1])
+
+	// METHODS
+	if nmethods == 0 {
+		return -1, fmt.Errorf("no authentication methods")
+	}
+
+	if _, err := io.ReadFull(conn, buf[:nmethods]); err != nil {
+		return -1, err
+	}
+
+	return nmethods, nil
 }
 
 // selectAuthMethod chooses the server's required method if the client offered it.
@@ -162,19 +221,70 @@ func (s *Server) selectAuthMethod(methods []byte) (byte, bool) {
 	default:
 		return authNoAccept, false
 	}
-	for _, m := range methods {
-		if m == required {
-			return required, true
-		}
+	return required, slices.Contains(methods, required)
+}
+
+func (s *Server) readConnectRequest(conn net.Conn, buf []byte) (core.Addr, byte, error) {
+	// VER + CMD + RSV + ATYP
+	if _, err := io.ReadFull(conn, buf[:4]); err != nil {
+		return core.Addr{}, repGeneralFailure, err
 	}
-	return authNoAccept, false
+	if buf[0] != socksVersion {
+		return core.Addr{}, repGeneralFailure, fmt.Errorf("unsupported SOCKS version %d", buf[0])
+	}
+	if buf[1] != cmdConnect {
+		return core.Addr{}, repCommandNotSupported, fmt.Errorf("unsupported command %d", buf[1])
+	}
+	if buf[2] != 0x00 {
+		return core.Addr{}, repGeneralFailure, fmt.Errorf("non-zero reserved byte")
+	}
+
+	var host string
+	switch buf[3] {
+	case addrTypeIPv4:
+		if _, err := io.ReadFull(conn, buf[:4]); err != nil {
+			return core.Addr{}, repGeneralFailure, err
+		}
+		host = net.IP(buf[:4]).String()
+	case addrTypeDomain:
+		if _, err := io.ReadFull(conn, buf[:1]); err != nil {
+			return core.Addr{}, repGeneralFailure, err
+		}
+		domainLen := int(buf[0])
+		if domainLen == 0 {
+			return core.Addr{}, repGeneralFailure, errors.New("empty domain")
+		}
+		if _, err := io.ReadFull(conn, buf[:domainLen]); err != nil {
+			return core.Addr{}, repGeneralFailure, err
+		}
+		host = string(buf[:domainLen])
+	case addrTypeIPv6:
+		if _, err := io.ReadFull(conn, buf[:16]); err != nil {
+			return core.Addr{}, repGeneralFailure, err
+		}
+		host = net.IP(buf[:16]).String()
+	default:
+		return core.Addr{}, repAddressTypeNotSupported, fmt.Errorf("unsupported address type %d", buf[3])
+	}
+
+	// DST.PORT
+	if _, err := io.ReadFull(conn, buf[:2]); err != nil {
+		return core.Addr{}, repGeneralFailure, err
+	}
+	port := binary.BigEndian.Uint16(buf[:2])
+
+	// Build core.Addr
+	if buf[3] == addrTypeDomain {
+		return core.AddrFromDomain(host, port), repSucceeded, nil
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return core.Addr{}, repGeneralFailure, err
+	}
+	return core.AddrFromIPPort(ip, port), repSucceeded, nil
 }
 
 // authenticate performs SOCKS5 username/password sub-negotiation.
-//
-// TODO(user): this function is copied from the old implementation but is
-// left here as a helper. Wire it into handleConn once you implement the
-// handshake.
 func (s *Server) authenticate(conn net.Conn) (string, error) {
 	var buf [256]byte
 
@@ -259,8 +369,6 @@ func writeSocks5Reply(conn net.Conn, rep byte) error {
 }
 
 // addrFromNet converts a net.Addr into a core.Addr.
-//
-// TODO(user): use this helper in handleConn when building Metadata.
 func addrFromNet(a net.Addr) core.Addr {
 	tcp, ok := a.(*net.TCPAddr)
 	if !ok {
@@ -271,23 +379,4 @@ func addrFromNet(a net.Addr) core.Addr {
 		return core.Addr{}
 	}
 	return core.AddrFromIPPort(ip.Unmap(), uint16(tcp.Port))
-}
-
-// parseTargetPort is a small helper for parsing the 2-byte port.
-//
-// TODO(user): use binary.BigEndian in handleConn instead; this is just a
-// reminder of the shape.
-func parseTargetPort(b []byte) uint16 {
-	return uint16(b[0])<<8 | uint16(b[1])
-}
-
-// stringToPort validates a port string for the target.
-//
-// TODO(user): remove once handleConn uses core.ParseAddr.
-func stringToPort(s string) (uint16, error) {
-	p, err := strconv.ParseUint(s, 10, 16)
-	if err != nil {
-		return 0, err
-	}
-	return uint16(p), nil
 }
