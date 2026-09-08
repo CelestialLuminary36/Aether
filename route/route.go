@@ -65,7 +65,11 @@ func lowercaseSlice(in []string) []string {
 }
 
 func (r *Router) Route(md *core.Metadata) (core.Decision, error) {
-	return r.routeInternal(md, false)
+	// A Metadata with ResolvedIPs set is treated as the second pass of
+	// two-stage routing: GeoIP/CIDR rules may match, and ActionResolve
+	// rules are skipped to avoid infinite loops.
+	resolved := len(md.ResolvedIPs) > 0
+	return r.routeInternal(md, resolved)
 }
 
 func (r *Router) routeInternal(md *core.Metadata, resolved bool) (core.Decision, error) {
@@ -109,9 +113,12 @@ func (r *Router) matchStage(rule Rule, md *core.Metadata, resolved bool) bool {
 	}
 
 	if len(rule.Domain) > 0 || len(rule.DomainSuffix) > 0 || len(rule.DomainKeyword) > 0 {
-		host := md.Destination.Domain()
+		// Sniffed domain (e.g. TLS SNI) takes precedence over the
+		// Destination host, because the client may connect to an IP while
+		// requesting a specific hostname.
+		host := md.SniffedDomain
 		if host == "" {
-			host = md.SniffedDomain
+			host = md.Destination.Domain()
 		}
 		if !matchDomain(rule, host) {
 			return false

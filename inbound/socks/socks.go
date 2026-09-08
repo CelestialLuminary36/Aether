@@ -131,12 +131,22 @@ func (s *Server) Close() error {
 }
 
 // handleConn performs the SOCKS5 handshake and dispatches to the core.Dispatcher.
+//
+// Ownership of conn: this function owns conn until onDialed succeeds. At
+// that point ownership transfers to core.Relay (via the Dispatcher), which
+// will close conn on return. If onDialed never succeeds, this function
+// closes conn itself.
 func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
-	defer func() { _ = conn.Close() }()
+	connectionSuccess := false
+	defer func() {
+		if !connectionSuccess {
+			_ = conn.Close()
+		}
+	}()
 
 	buf := make([]byte, 512)
 	// 1. Read method negotiation and select auth.
-	nmethods, err := s.negotiate(conn, buf)
+	nmethods, err := s.readMethodNegotiation(conn, buf)
 	if err != nil {
 		slog.Debug("SOCKS5 method negotiation failed", "remote", conn.RemoteAddr(), "err", err)
 		return
@@ -175,20 +185,23 @@ func (s *Server) handleConn(ctx context.Context, conn net.Conn) {
 		User:        user,
 	}
 	// 5. Call s.dispatcher.DispatchStream(ctx, md, conn, onDialed).
-	//    In onDialed, write repSucceeded.
-	var dialed bool
+	//    In onDialed, write repSucceeded. If onDialed succeeds, ownership
+	//    of conn transfers to the Dispatcher/Relay.
 	onDialed := func() error {
-		dialed = true
-		return writeSocks5Reply(conn, repSucceeded)
+		if err := writeSocks5Reply(conn, repSucceeded); err != nil {
+			return err
+		}
+		connectionSuccess = true
+		return nil
 	}
 	// 6. If dispatch returns an error before onDialed ran, write the
-	if err := s.dispatcher.DispatchStream(ctx, md, conn, onDialed); err != nil && !dialed {
-		//    mapped REP code and close.
+	//    mapped REP code and close.
+	if err := s.dispatcher.DispatchStream(ctx, md, conn, onDialed); err != nil && !connectionSuccess {
 		_ = writeSocks5Reply(conn, mapErrToRep(err))
 	}
 }
 
-func (s *Server) negotiate(conn net.Conn, buf []byte) (int, error) {
+func (s *Server) readMethodNegotiation(conn net.Conn, buf []byte) (int, error) {
 	// VER + METHODS
 	if _, err := io.ReadFull(conn, buf[:2]); err != nil {
 		return -1, err
@@ -239,8 +252,9 @@ func (s *Server) readConnectRequest(conn net.Conn, buf []byte) (core.Addr, byte,
 		return core.Addr{}, repGeneralFailure, fmt.Errorf("non-zero reserved byte")
 	}
 
+	addrType := buf[3]
 	var host string
-	switch buf[3] {
+	switch addrType {
 	case addrTypeIPv4:
 		if _, err := io.ReadFull(conn, buf[:4]); err != nil {
 			return core.Addr{}, repGeneralFailure, err
@@ -264,7 +278,7 @@ func (s *Server) readConnectRequest(conn net.Conn, buf []byte) (core.Addr, byte,
 		}
 		host = net.IP(buf[:16]).String()
 	default:
-		return core.Addr{}, repAddressTypeNotSupported, fmt.Errorf("unsupported address type %d", buf[3])
+		return core.Addr{}, repAddressTypeNotSupported, fmt.Errorf("unsupported address type %d", addrType)
 	}
 
 	// DST.PORT
@@ -274,7 +288,7 @@ func (s *Server) readConnectRequest(conn net.Conn, buf []byte) (core.Addr, byte,
 	port := binary.BigEndian.Uint16(buf[:2])
 
 	// Build core.Addr
-	if buf[3] == addrTypeDomain {
+	if addrType == addrTypeDomain {
 		return core.AddrFromDomain(host, port), repSucceeded, nil
 	}
 	ip, err := netip.ParseAddr(host)
@@ -332,28 +346,6 @@ func (s *Server) authenticate(conn net.Conn) (string, error) {
 		return "", fmt.Errorf("write authentication success: %w", err)
 	}
 	return username, nil
-}
-
-// mapErrToRep translates core semantic errors into SOCKS5 REP codes.
-//
-// TODO(user): move this to a separate errmap.go file and add unit tests
-// (Plan 1 Task 9). Keep it here for now to reduce file count while
-// scaffolding.
-func mapErrToRep(err error) byte {
-	switch {
-	case err == nil:
-		return repSucceeded
-	case errors.Is(err, core.ErrNetworkUnreachable):
-		return repNetworkUnreachable
-	case errors.Is(err, core.ErrHostUnreachable):
-		return repHostUnreachable
-	case errors.Is(err, core.ErrConnectionRefused):
-		return repConnectionRefused
-	case errors.Is(err, core.ErrBlockedByRule):
-		return repNotAllowedByRuleset
-	default:
-		return repGeneralFailure
-	}
 }
 
 func writeSocks5Reply(conn net.Conn, rep byte) error {

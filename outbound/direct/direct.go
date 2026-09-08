@@ -4,7 +4,9 @@ package direct
 
 import (
 	"context"
+	"errors"
 	"net"
+	"syscall"
 
 	"github.com/CelestialLuminary36/Aether/core"
 )
@@ -27,7 +29,28 @@ func (d *Direct) Networks() []core.Network { return []core.Network{core.NetworkT
 // DialStream opens a TCP connection to md.Destination.
 func (d *Direct) DialStream(ctx context.Context, md *core.Metadata) (net.Conn, error) {
 	var dialer net.Dialer
-	return dialer.DialContext(ctx, "tcp", md.Destination.String())
+	conn, err := dialer.DialContext(ctx, "tcp", md.Destination.String())
+	if err != nil {
+		return nil, mapDialError(err)
+	}
+	return conn, nil
+}
+
+// mapDialError translates standard library dial errors into core semantic
+// errors so that inbound protocols can produce meaningful failure replies.
+func mapDialError(err error) error {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) {
+		switch {
+		case errors.Is(opErr.Err, syscall.ECONNREFUSED):
+			return core.ErrConnectionRefused
+		case errors.Is(opErr.Err, syscall.EHOSTUNREACH):
+			return core.ErrHostUnreachable
+		case errors.Is(opErr.Err, syscall.ENETUNREACH):
+			return core.ErrNetworkUnreachable
+		}
+	}
+	return err
 }
 
 // DialPacket is not implemented in Plan 1.
