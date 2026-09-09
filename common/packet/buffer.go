@@ -44,8 +44,6 @@ func (b *Buffer) Reset() {
 
 // Advance reserves n bytes at the tail and returns a slice pointing to
 // that writable region. Panics if tail room is exhausted.
-//
-// TODO(user): write a test for the panic case and for normal usage.
 func (b *Buffer) Advance(n int) []byte {
 	if b.end+n > cap(b.data) {
 		panic("packet.Buffer: Advance exceeds capacity")
@@ -57,9 +55,6 @@ func (b *Buffer) Advance(n int) []byte {
 
 // ExtendHeader reserves n bytes at the head and returns a slice pointing
 // to that writable region. Panics if head room is exhausted.
-//
-// TODO(user): write a test for the prepend behavior and for header
-// exhaustion.
 func (b *Buffer) ExtendHeader(n int) []byte {
 	if b.start-n < 0 {
 		panic("packet.Buffer: ExtendHeader exceeds head room")
@@ -69,8 +64,6 @@ func (b *Buffer) ExtendHeader(n int) []byte {
 }
 
 // Truncate sets the valid data length to n.
-//
-// TODO(user): add tests for Truncate and Reset restoring headroom.
 func (b *Buffer) Truncate(n int) {
 	if n < 0 || b.start+n > cap(b.data) {
 		panic("packet.Buffer: Truncate out of range")

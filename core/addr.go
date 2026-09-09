@@ -31,9 +31,6 @@ func AddrFromDomain(domain string, port uint16) Addr {
 
 // ParseAddr parses a "host:port" string. Numeric IPs become IP-based
 // addresses; everything else becomes domain-based.
-//
-// TODO(user): add unit tests for IPv4, IPv6, domain, and malformed inputs.
-// See Plan 1 Task 2.
 func ParseAddr(s string) (Addr, error) {
 	host, portStr, err := net.SplitHostPort(s)
 	if err != nil {
@@ -64,8 +61,6 @@ func (a Addr) Domain() string { return a.domain }
 func (a Addr) Port() uint16   { return a.port }
 
 // String returns "host:port" form. IPv6 addresses are bracketed.
-//
-// TODO(user): verify String() round-trips with ParseAddr.
 func (a Addr) String() string {
 	if a.IsDomain() {
 		return net.JoinHostPort(a.domain, strconv.Itoa(int(a.port)))

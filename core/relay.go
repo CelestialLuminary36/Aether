@@ -28,9 +28,6 @@ type halfCloser interface {
 //   - On ctx cancellation, both connections are closed immediately.
 //   - On return, both left and right are closed. The caller must not use
 //     or close them again.
-//
-// TODO(user): add tests for bidirectional copy, ctx cancellation, and
-// byte counts. See Plan 1 Task 5.
 func Relay(ctx context.Context, left, right net.Conn) (uplink, downlink uint64, err error) {
 	stop := make(chan struct{})
 	defer close(stop)

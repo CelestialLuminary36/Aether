@@ -26,9 +26,6 @@ func (n Network) String() string {
 //
 // Inbound implementations fill Network, Source, Destination, InboundTag,
 // and User. The remaining fields are filled by the Dispatcher pipeline.
-//
-// TODO(user): add tests for Network/String, Action/String, and Metadata
-// copyability. See Plan 1 Task 3.
 type Metadata struct {
 	Network Network
 
