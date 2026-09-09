@@ -37,7 +37,7 @@ func TestSOCKS5_EndToEnd(t *testing.T) {
 
 	// SOCKS5 server with direct outbound.
 	out := direct.New("out")
-	disp := dispatcher.New(out, nil)
+	disp := dispatcher.NewStaticDispatcher(out, nil)
 	server := socks.New("in", "127.0.0.1:0", socks.AuthNone, nil, disp)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -107,7 +107,7 @@ func TestSOCKS5_EndToEnd(t *testing.T) {
 // is unreachable.
 func TestSOCKS5_ConnectRefused(t *testing.T) {
 	out := direct.New("out")
-	disp := dispatcher.New(out, nil)
+	disp := dispatcher.NewStaticDispatcher(out, nil)
 	server := socks.New("in", "127.0.0.1:0", socks.AuthNone, nil, disp)
 
 	ctx, cancel := context.WithCancel(context.Background())

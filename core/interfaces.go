@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"net"
+	"net/netip"
 	"time"
 
 	"github.com/CelestialLuminary36/Aether/common/packet"
@@ -48,11 +49,19 @@ type Outbound interface {
 	DialPacket(ctx context.Context, md *Metadata) (PacketConn, error)
 }
 
+// RouteStage tells the Router which pass of two-stage routing this is.
+// The Dispatcher owns the "resolve already ran" state and passes the
+// stage explicitly; it is never inferred from Metadata.
+type RouteStage uint8
+
+const (
+	StageInitial RouteStage = iota
+	StagePostResolve
+)
+
 // Router is a pure function: metadata in, decision out.
-//
-// TODO(user): implement the two-stage routing engine in Plan 2.
 type Router interface {
-	Route(md *Metadata) (Decision, error)
+	Route(md *Metadata, stage RouteStage) (Decision, error)
 }
 
 // PacketConn is a packet-oriented connection.
@@ -69,4 +78,21 @@ type PacketConn interface {
 	LocalAddr() net.Addr
 	SetReadDeadline(t time.Time) error
 	SetWriteDeadline(t time.Time) error
+}
+
+type Resolver interface {
+	Lookup(ctx context.Context, md *Metadata) ([]netip.Addr, error)
+}
+
+// Sniffer inspects the leading bytes of a connection to guess the
+// protocol and destination domain without consuming the stream.
+type Sniffer interface {
+	Name() string
+	Sniff(header []byte) (SniffResult, error)
+}
+
+// SniffResult is what a Sniffer learned from a connection's leading bytes.
+type SniffResult struct {
+	Protocol string // "tls", "http", ...
+	Domain   string // TLS SNI or HTTP Host; empty if none
 }

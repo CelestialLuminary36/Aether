@@ -11,6 +11,10 @@ var (
 	ErrBlockedByRule       = errors.New("blocked by rule")
 	ErrNetworkNotSupported = errors.New("network not supported")
 	ErrNoRouteMatched      = errors.New("no route matched")
+	ErrUnknownOutbound     = errors.New("unknown outbound tag")
+	ErrInvalidDecision     = errors.New("invalid routing decision")
+	ErrResolveFailed       = errors.New("dns resolve failed")
+	ErrEmptyResolve        = errors.New("dns resolve returned no address")
 
 	// ErrNeedMoreData is returned by Sniffers when more bytes are needed
 	// to make a determination. Used in Plan 2.

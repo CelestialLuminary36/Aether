@@ -1,6 +1,9 @@
 package core
 
-import "net/netip"
+import (
+	"fmt"
+	"net/netip"
+)
 
 // Network identifies the transport type of a request.
 type Network uint8
@@ -72,4 +75,24 @@ func (a Action) String() string {
 type Decision struct {
 	Action   Action
 	Outbound string
+}
+
+func (d Decision) Valid(resolved bool) error {
+	switch d.Action {
+	case ActionProxy:
+		if d.Outbound == "" {
+			return fmt.Errorf("%w: proxy decision carries no outbound tag", ErrInvalidDecision)
+		}
+	case ActionDirect, ActionBlock:
+		if d.Outbound != "" {
+			return fmt.Errorf("%w: %s must not carry an outbound tag", ErrInvalidDecision, d.Action)
+		}
+	case ActionResolve:
+		if resolved {
+			return fmt.Errorf("%w: resolve after resolution already ran", ErrInvalidDecision)
+		}
+	default:
+		return fmt.Errorf("%w: unknown action %q", ErrInvalidDecision, d.Action)
+	}
+	return nil
 }

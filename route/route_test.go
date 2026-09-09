@@ -59,7 +59,7 @@ func TestRouter_DomainMatch(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := r.Route(c.md)
+			got, err := r.Route(c.md, core.StageInitial)
 			if err != nil {
 				t.Fatalf("Route: %v", err)
 			}
@@ -81,7 +81,7 @@ func TestRouter_NetworkFilter(t *testing.T) {
 	udp := mdDomain("x.com", 443)
 	udp.Network = core.NetworkUDP
 
-	got, err := r.Route(tcp)
+	got, err := r.Route(tcp, core.StageInitial)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestRouter_NetworkFilter(t *testing.T) {
 		t.Errorf("tcp got %v want direct", got)
 	}
 
-	got, err = r.Route(udp)
+	got, err = r.Route(udp, core.StageInitial)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,11 +106,11 @@ func TestRouter_PortFilter(t *testing.T) {
 	dns := mdDomain("x.com", 53)
 	https := mdDomain("x.com", 443)
 
-	got, _ := r.Route(dns)
+	got, _ := r.Route(dns, core.StageInitial)
 	if got.Action != core.ActionDirect {
 		t.Errorf("port 53 got %v want direct", got)
 	}
-	got, _ = r.Route(https)
+	got, _ = r.Route(https, core.StageInitial)
 	if got.Action != core.ActionProxy {
 		t.Errorf("port 443 got %v want proxy", got)
 	}
@@ -127,7 +127,7 @@ func TestRouter_ResolveTwoStage(t *testing.T) {
 	md := mdDomain("foo.internal", 443)
 
 	// First pass should ask for resolution.
-	got, err := r.Route(md)
+	got, err := r.Route(md, core.StageInitial)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestRouter_ResolveTwoStage(t *testing.T) {
 	md.ResolvedIPs = []netip.Addr{netip.MustParseAddr("10.1.2.3")}
 
 	// Second pass should match CIDR and return direct.
-	got, err = r.Route(md)
+	got, err = r.Route(md, core.StagePostResolve)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestRouter_ResolveFallsBackToDefault(t *testing.T) {
 	md := mdDomain("x.resolveme", 443)
 	md.ResolvedIPs = []netip.Addr{netip.MustParseAddr("1.2.3.4")}
 
-	got, err := r.Route(md)
+	got, err := r.Route(md, core.StagePostResolve)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestRouter_SniffedDomainPreferred(t *testing.T) {
 	md := mdIP("1.2.3.4", 443)
 	md.SniffedDomain = "www.netflix.com"
 
-	got, err := r.Route(md)
+	got, err := r.Route(md, core.StageInitial)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestRouter_PrivateGeoIP(t *testing.T) {
 	md := mdIP("192.168.1.1", 443)
 	md.ResolvedIPs = []netip.Addr{netip.MustParseAddr("192.168.1.1")}
 
-	got, err := r.Route(md)
+	got, err := r.Route(md, core.StagePostResolve)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -110,7 +110,7 @@ func TestDispatchStream_DialOnDialedRelayOrder(t *testing.T) {
 		conn:     outConn,
 		onDial:   func() { events = append(events, "dial") },
 	}
-	disp := New(stub, nil)
+	disp := NewStaticDispatcher(stub, nil)
 
 	dialed := make(chan struct{})
 	done := make(chan error, 1)
@@ -162,7 +162,7 @@ func TestDispatchStream_DialError(t *testing.T) {
 		networks: []core.Network{core.NetworkTCP},
 		dialErr:  boom,
 	}
-	disp := New(stub, nil)
+	disp := NewStaticDispatcher(stub, nil)
 
 	inA, inB := net.Pipe()
 	defer inB.Close()
@@ -194,7 +194,7 @@ func TestDispatchStream_OnDialedError(t *testing.T) {
 		networks: []core.Network{core.NetworkTCP},
 		conn:     outA,
 	}
-	disp := New(stub, nil)
+	disp := NewStaticDispatcher(stub, nil)
 
 	inA, inB := net.Pipe()
 	defer inB.Close()
@@ -223,7 +223,7 @@ func TestDispatchStream_RelayError(t *testing.T) {
 		networks: []core.Network{core.NetworkTCP},
 		conn:     outA,
 	}
-	disp := New(stub, nil)
+	disp := NewStaticDispatcher(stub, nil)
 
 	inA, inB := net.Pipe()
 	defer inB.Close()
@@ -256,7 +256,7 @@ func (o *ctxBlockOutbound) DialPacket(ctx context.Context, md *core.Metadata) (c
 
 func TestDispatchStream_ContextCanceled(t *testing.T) {
 	stub := &ctxBlockOutbound{started: make(chan struct{})}
-	disp := New(stub, nil)
+	disp := NewStaticDispatcher(stub, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	inA, inB := net.Pipe()
@@ -282,7 +282,7 @@ func TestDispatchStream_ContextCanceled(t *testing.T) {
 
 func TestDispatchPacket_NotSupported(t *testing.T) {
 	stub := &stubOutbound{tag: "stub", networks: []core.Network{core.NetworkTCP}}
-	disp := New(stub, nil)
+	disp := NewStaticDispatcher(stub, nil)
 
 	err := disp.DispatchPacket(context.Background(), testMetadata(), nil)
 	if err != core.ErrNetworkNotSupported {

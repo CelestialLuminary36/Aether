@@ -1,8 +1,11 @@
 // Package dispatcher implements core.Dispatcher.
 //
-// Plan 1 provides StaticDispatcher: no sniffing, no routing, no DNS.
-// Every stream is sent to the primary outbound. Later plans will extend
-// this into the full pipeline described in the spec.
+// Two implementations exist:
+//   - StaticDispatcher (Plan 1): no routing; every stream goes to the
+//     primary outbound.
+//   - PipelineDispatcher (Plan 2): the routed runtime pipeline, built
+//     from explicit dependencies (core.Router, core.Resolver,
+//     OutboundRegistry, optional core.Sniffers).
 package dispatcher
 
 import (
@@ -20,9 +23,29 @@ type StaticDispatcher struct {
 	block core.Outbound
 }
 
-// New creates a StaticDispatcher. block may be nil.
-func New(primary core.Outbound, block core.Outbound) *StaticDispatcher {
+type PipelineDispatcher struct {
+	router   core.Router
+	resolver core.Resolver
+	registry *OutboundRegistry
+	sniffers []core.Sniffer
+}
+
+type Option func(*PipelineDispatcher)
+
+// NewStaticDispatcher creates a StaticDispatcher. block may be nil.
+func NewStaticDispatcher(primary core.Outbound, block core.Outbound) *StaticDispatcher {
 	return &StaticDispatcher{primary: primary, block: block}
+}
+
+func NewPipelineDispatcher(router core.Router, resolver core.Resolver,
+	reg *OutboundRegistry, opts ...Option) *PipelineDispatcher {
+	return &PipelineDispatcher{router: router, resolver: resolver, registry: reg}
+}
+
+func WithSniffers(s ...core.Sniffer) Option {
+	return func(d *PipelineDispatcher) {
+		d.sniffers = append(d.sniffers, s...)
+	}
 }
 
 // DispatchStream dials the primary outbound, calls onDialed, then relays.
@@ -31,9 +54,8 @@ func New(primary core.Outbound, block core.Outbound) *StaticDispatcher {
 // both inConn and outConn on return. The dispatcher must not close
 // outConn again.
 //
-// TODO(user): when Plan 2 adds routing, select outbound based on
-// md.Destination / SniffedDomain / ResolvedIPs instead of always using
-// primary.
+// StaticDispatcher carries no routing; PipelineDispatcher replaces it
+// once stream dispatch is implemented (Plan 2 Task 4).
 func (d *StaticDispatcher) DispatchStream(
 	ctx context.Context,
 	md *core.Metadata,

@@ -64,12 +64,11 @@ func lowercaseSlice(in []string) []string {
 	return out
 }
 
-func (r *Router) Route(md *core.Metadata) (core.Decision, error) {
-	// A Metadata with ResolvedIPs set is treated as the second pass of
-	// two-stage routing: GeoIP/CIDR rules may match, and ActionResolve
-	// rules are skipped to avoid infinite loops.
-	resolved := len(md.ResolvedIPs) > 0
-	return r.routeInternal(md, resolved)
+func (r *Router) Route(md *core.Metadata, stage core.RouteStage) (core.Decision, error) {
+	// In StagePostResolve, GeoIP/CIDR rules may match and ActionResolve
+	// rules are skipped to avoid infinite loops. The stage is passed
+	// explicitly by the Dispatcher, never inferred from ResolvedIPs.
+	return r.routeInternal(md, stage == core.StagePostResolve)
 }
 
 func (r *Router) routeInternal(md *core.Metadata, resolved bool) (core.Decision, error) {

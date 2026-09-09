@@ -1,6 +1,7 @@
 package core
 
 import (
+	"errors"
 	"net/netip"
 	"testing"
 )
@@ -120,5 +121,43 @@ func TestDecision_ZeroValue(t *testing.T) {
 	}
 	if d.Outbound != "" {
 		t.Errorf("zero Decision Outbound = %q, want empty", d.Outbound)
+	}
+}
+
+func TestDecision_Valid(t *testing.T) {
+	tests := []struct {
+		name     string
+		decision Decision
+		resolved bool
+		wantErr  bool
+	}{
+		{"proxy with tag", Decision{Action: ActionProxy, Outbound: "us"}, false, false},
+		{"proxy without tag", Decision{Action: ActionProxy}, false, true},
+		{"direct", Decision{Action: ActionDirect}, false, false},
+		{"direct must not carry tag", Decision{Action: ActionDirect, Outbound: "x"}, false, true},
+		{"block", Decision{Action: ActionBlock}, false, false},
+		{"block must not carry tag", Decision{Action: ActionBlock, Outbound: "x"}, false, true},
+		{"resolve on first pass", Decision{Action: ActionResolve}, false, false},
+		{"resolve after resolution is a loop", Decision{Action: ActionResolve}, true, true},
+		{"unknown action", Decision{Action: Action(42)}, false, true},
+		{"zero value is invalid", Decision{}, false, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.decision.Valid(tt.resolved)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("Valid(resolved=%v) = %v, want nil", tt.resolved, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("Valid(resolved=%v) = nil, want an error", tt.resolved)
+			}
+			if !errors.Is(err, ErrInvalidDecision) {
+				t.Fatalf("Valid error = %v, want it to wrap ErrInvalidDecision", err)
+			}
+		})
 	}
 }

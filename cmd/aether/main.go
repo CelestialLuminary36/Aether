@@ -39,7 +39,7 @@ func main() {
 	// Dispatcher: Plan 1 always uses the primary outbound.
 	// TODO(user): in Plan 2 replace StaticDispatcher with the real
 	// pipeline dispatcher that uses route.Router + dns.Resolver.
-	disp := dispatcher.New(out, blk)
+	disp := dispatcher.NewStaticDispatcher(out, blk)
 
 	// Inbound: SOCKS5 with password auth.
 	in := socks.New(
