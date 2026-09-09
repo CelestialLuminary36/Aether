@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"net"
-	"syscall"
 
 	"github.com/CelestialLuminary36/Aether/core"
 )
@@ -22,8 +21,8 @@ func New(tag string) *Direct {
 	return &Direct{tag: tag}
 }
 
-func (d *Direct) Tag() string             { return d.tag }
-func (d *Direct) Type() string            { return "direct" }
+func (d *Direct) Tag() string              { return d.tag }
+func (d *Direct) Type() string             { return "direct" }
 func (d *Direct) Networks() []core.Network { return []core.Network{core.NetworkTCP} }
 
 // DialStream opens a TCP connection to md.Destination.
@@ -38,19 +37,20 @@ func (d *Direct) DialStream(ctx context.Context, md *core.Metadata) (net.Conn, e
 
 // mapDialError translates standard library dial errors into core semantic
 // errors so that inbound protocols can produce meaningful failure replies.
+// errors.Is walks the full chain (net.OpError → os.SyscallError → Errno),
+// so no manual unwrapping is needed; the errno targets are platform-specific
+// (see errno_unix.go / errno_windows.go).
 func mapDialError(err error) error {
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
-		switch {
-		case errors.Is(opErr.Err, syscall.ECONNREFUSED):
-			return core.ErrConnectionRefused
-		case errors.Is(opErr.Err, syscall.EHOSTUNREACH):
-			return core.ErrHostUnreachable
-		case errors.Is(opErr.Err, syscall.ENETUNREACH):
-			return core.ErrNetworkUnreachable
-		}
+	switch {
+	case errors.Is(err, errConnRefused):
+		return core.ErrConnectionRefused
+	case errors.Is(err, errHostUnreachable):
+		return core.ErrHostUnreachable
+	case errors.Is(err, errNetUnreachable):
+		return core.ErrNetworkUnreachable
+	default:
+		return err
 	}
-	return err
 }
 
 // DialPacket is not implemented in Plan 1.
